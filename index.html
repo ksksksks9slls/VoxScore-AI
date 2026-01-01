@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxScore AI - Solfeo Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --bg-card: #1e1e1e;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --accent-green: #00ff88; /* Verde neón más brillante */
+            --accent-red: #ff4d4d;
+            --accent-blue: #3498db;
+            --glow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        #app-container {
+            width: 100%;
+            max-width: 850px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        /* --- UI COMPONENTS --- */
+        .screen { display: none; animation: fadeIn 0.5s; }
+        .screen.active { display: block; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .btn {
+            background: linear-gradient(135deg, var(--accent-blue), #2980b9);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 10px;
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+            transition: transform 0.2s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled { background: #555; cursor: not-allowed; box-shadow: none; }
+        .btn-secondary { background: transparent; border: 2px solid var(--text-secondary); }
+
+        /* --- CALIBRATION --- */
+        #calibration-visualizer {
+            width: 100%;
+            height: 150px;
+            background: #000;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 1px solid #333;
+        }
+        #calib-status { font-family: monospace; color: var(--accent-green); margin-top: 10px; min-height: 20px; }
+
+        /* --- COURSES --- */
+        .course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; margin-top: 20px; }
+        .course-card {
+            background: var(--bg-card);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid #333;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .course-card:hover { border-color: var(--accent-green); transform: translateY(-5px); }
+        .course-card.locked { opacity: 0.4; pointer-events: none; filter: grayscale(1); }
+        .course-icon { font-size: 2rem; margin-bottom: 10px; display: block; }
+
+        /* --- PRACTICE MODE & VEXFLOW --- */
+        #score-wrapper {
+            background: #fff; /* VexFlow se ve mejor en blanco o invertido, usaremos filtro */
+            filter: invert(1) hue-rotate(180deg); /* Truco para modo oscuro instantáneo en partitura */
+            border-radius: 10px;
+            padding: 10px;
+            margin: 20px 0;
+            min-height: 180px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #feedback-area { font-size: 2rem; font-weight: 800; min-height: 50px; text-transform: uppercase; letter-spacing: 2px; }
+        .success { color: var(--accent-green); text-shadow: 0 0 20px var(--accent-green); }
+        .fail { color: var(--accent-red); text-shadow: 0 0 20px var(--accent-red); }
+        
+        #note-monitor { font-size: 0.9rem; color: #666; margin-top: 5px; }
+
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+
+    <div id="screen-calibration" class="screen active">
+        <h1>🎙️ Calibración Inicial</h1>
+        <p>VoxScore necesita ajustar tu micrófono para empezar.</p>
+        
+        <canvas id="calibration-visualizer"></canvas>
+        <div id="calib-status">Esperando inicio...</div>
+        
+        <button id="btn-start-calib" class="btn">🔊 Activar Micrófono</button>
+        <button id="btn-finish-calib" class="btn" disabled>Continuar</button>
+    </div>
+
+    <div id="screen-menu" class="screen">
+        <h1>Academia VoxScore</h1>
+        <p>Tu progreso se guarda automáticamente.</p>
+
+        <div class="academy-group">
+            <h3>🥁 Ritmo & Pulso</h3>
+            <div class="course-grid" id="grid-rhythm"></div>
+        </div>
+        <div class="academy-group">
+            <h3>🎼 Entonación Musical</h3>
+            <div class="course-grid" id="grid-melodic"></div>
+        </div>
+        <div class="academy-group">
+            <h3>🚀 Nivel Pre-Avanzado</h3>
+            <div class="course-grid" id="grid-advanced"></div>
+        </div>
+    </div>
+
+    <div id="screen-practice" class="screen">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <button class="btn btn-secondary" onclick="goMenu()">← Salir</button>
+            <h2 id="practice-title">Lección</h2>
+        </div>
+
+        <div id="score-wrapper">
+            <div id="vexflow-output"></div>
+        </div>
+
+        <div id="feedback-area">...</div>
+        <div id="note-monitor">Detectando: <span id="debug-note">--</span></div>
+    </div>
+
+</div>
+
+<script>
+/**
+ * ==========================================
+ * CONFIGURACIÓN & ESTADO
+ * ==========================================
+ */
+const AppState = {
+    audioContext: null,
+    analyser: null,
+    microphone: null,
+    isCalibrated: false,
+    noiseFloor: 0.01,
+    db: [
+        // RITMO
+        { id: 'r1', cat: 'rhythm', title: 'Pulso de Negras', notes: ['b/4/q', 'b/4/q', 'b/4/q', 'b/4/q'], bpm: 60 },
+        { id: 'r2', cat: 'rhythm', title: 'Silencios Básicos', notes: ['b/4/q', 'b/4/qr', 'b/4/q', 'b/4/qr'], bpm: 60 },
+        { id: 'r3', cat: 'rhythm', title: 'Blancas Lentas', notes: ['b/4/h', 'b/4/h'], bpm: 60 },
+        { id: 'r4', cat: 'rhythm', title: 'Corcheas Veloces', notes: ['b/4/q', 'b/4/8', 'b/4/8', 'b/4/h'], bpm: 50 },
+        // MELODÍA
+        { id: 'm1', cat: 'melodic', title: 'Do - Re - Mi', notes: ['c/4/w', 'd/4/w', 'e/4/w'], bpm: 0 }, // bpm 0 = sin tiempo
+        { id: 'm2', cat: 'melodic', title: 'Escala C Ascendente', notes: ['c/4/h', 'd/4/h', 'e/4/h', 'f/4/h', 'g/4/w'], bpm: 0 },
+        { id: 'm3', cat: 'melodic', title: 'Saltos de Tercera', notes: ['c/4/h', 'e/4/h', 'd/4/h', 'f/4/h'], bpm: 0 },
+        { id: 'm4', cat: 'melodic', title: 'Arpegio Mayor', notes: ['c/4/q', 'e/4/q', 'g/4/q', 'c/5/w'], bpm: 0 },
+        // AVANZADO
+        { id: 'a1', cat: 'advanced', title: 'Lectura Compleja', notes: ['c/4/q', 'e/4/8', 'g/4/8', 'c/5/h'], bpm: 60 },
+        { id: 'a2', cat: 'advanced', title: 'Sostenidos (F#)', notes: ['g/4/h', 'f#/4/h', 'g/4/w'], bpm: 0 },
+        { id: 'a3', cat: 'advanced', title: 'La Quinta Justa', notes: ['c/4/q', 'g/4/q', 'c/5/h'], bpm: 0 },
+        { id: 'a4', cat: 'advanced', title: 'Examen Final', notes: ['e/4/q', 'e/4/q', 'f/4/q', 'g/4/q', 'g/4/q', 'f/4/q', 'e/4/q', 'd/4/q'], bpm: 70 }
+    ],
+    unlocked: JSON.parse(localStorage.getItem('voxUnlocked')) || ['r1', 'm1', 'a1'],
+    currentCourse: null,
+    noteIndex: 0,
+    isPlaying: false
+};
+
+// Utilidad para guardar progreso
+function saveProgress(courseId) {
+    if (!AppState.unlocked.includes(courseId)) {
+        AppState.unlocked.push(courseId);
+        localStorage.setItem('voxUnlocked', JSON.stringify(AppState.unlocked));
+    }
+}
+
+/**
+ * ==========================================
+ * MOTOR DE AUDIO (CORREGIDO)
+ * ==========================================
+ */
+async function initAudioEngine() {
+    const status = document.getElementById('calib-status');
+    
+    try {
+        // 1. Crear Contexto
+        if (!AppState.audioContext) {
+            AppState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        // 2. IMPORTANTE: Reanudar si está suspendido (Fix del error anterior)
+        if (AppState.audioContext.state === 'suspended') {
+            status.innerText = "Reanudando motor de audio...";
+            await AppState.audioContext.resume();
+        }
+
+        // 3. Obtener Micrófono
+        status.innerText = "Solicitando permiso de micrófono...";
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } 
+        });
+
+        // 4. Conectar Nodos
+        AppState.microphone = AppState.audioContext.createMediaStreamSource(stream);
+        AppState.analyser = AppState.audioContext.createAnalyser();
+        AppState.analyser.fftSize = 2048;
+        AppState.microphone.connect(AppState.analyser);
+
+        status.innerText = "Audio Activo. ¡Haz ruido!";
+        startCalibrationLoop();
+        return true;
+
+    } catch (err) {
+        console.error(err);
+        status.innerText = "ERROR: " + err.message + ". Verifica permisos (Icono candado).";
+        return false;
+    }
+}
+
+// Algoritmo YIN Simplificado para Pitch
+function getPitch(buffer, sampleRate) {
+    let SIZE = buffer.length;
+    let rms = Math.sqrt(buffer.reduce((s, v) => s + (v*v), 0) / SIZE);
+    if (rms < AppState.noiseFloor) return null; // Silencio
+
+    // Autocorrelación básica
+    let best_offset = -1, best_corr = 0;
+    for (let offset = 20; offset < SIZE/2; offset++) {
+        let corr = 0;
+        for (let i=0; i<SIZE/2; i++) corr += Math.abs(buffer[i] - buffer[i+offset]);
+        corr = 1 - (corr / (SIZE/2)); // Normalizar
+        if (corr > 0.9 && corr > best_corr) { best_corr = corr; best_offset = offset; }
+    }
+    
+    if (best_corr > 0.9) {
+        let freq = sampleRate / best_offset;
+        return freq;
+    }
+    return null;
+}
+
+// Frecuencia a Nota (ej: 440 -> A4)
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function freqToNote(freq) {
+    if (!freq) return null;
+    const noteNum = 12 * (Math.log(freq / 440) / Math.log(2));
+    const midi = Math.round(noteNum) + 69;
+    return { 
+        name: NOTE_NAMES[midi % 12], 
+        octave: Math.floor(midi / 12) - 1,
+        vexKey: NOTE_NAMES[midi % 12].toLowerCase() // Formato vexflow (c, d, e...)
+    };
+}
+
+/**
+ * ==========================================
+ * UI & LÓGICA DE CALIBRACIÓN
+ * ==========================================
+ */
+document.getElementById('btn-start-calib').onclick = async function() {
+    this.disabled = true;
+    const success = await initAudioEngine();
+    if (!success) this.disabled = false;
+};
+
+document.getElementById('btn-finish-calib').onclick = () => {
+    AppState.isCalibrated = true;
+    showScreen('screen-menu');
+    renderMenu();
+};
+
+function startCalibrationLoop() {
+    const canvas = document.getElementById('calibration-visualizer');
+    const ctx = canvas.getContext('2d');
+    const buffer = new Float32Array(AppState.analyser.fftSize);
+    let maxVol = 0;
+
+    function loop() {
+        if (AppState.isCalibrated) return; // Parar al salir
+        requestAnimationFrame(loop);
+        
+        AppState.analyser.getFloatTimeDomainData(buffer);
+        let rms = Math.sqrt(buffer.reduce((s, v) => s + (v*v), 0) / buffer.length);
+        
+        // Dibujar barra
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width, canvas.height);
+        
+        let width = Math.min(rms * 1000, canvas.width); // Sensibilidad
+        ctx.fillStyle = width > 50 ? 'var(--accent-green)' : '#555';
+        ctx.fillRect(0, 0, width, canvas.height);
+
+        // Lógica simple de éxito
+        if (rms > 0.05) { // Si detecta entrada decente
+            maxVol++;
+            if (maxVol > 50) { // 50 frames de audio detectado
+                document.getElementById('calib-status').innerText = "¡Micrófono calibrado correctamente!";
+                document.getElementById('btn-finish-calib').disabled = false;
+                document.getElementById('btn-finish-calib').classList.add('btn-primary');
+            }
+        }
+    }
+    loop();
+}
+
+/**
+ * ==========================================
+ * NAVEGACIÓN Y MENÚ
+ * ==========================================
+ */
+function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}
+
+function goMenu() {
+    AppState.isPlaying = false;
+    showScreen('screen-menu');
+    renderMenu();
+}
+
+function renderMenu() {
+    ['rhythm', 'melodic', 'advanced'].forEach(cat => {
+        const container = document.getElementById(`grid-${cat}`);
+        container.innerHTML = '';
+        AppState.db.filter(c => c.cat === cat).forEach(course => {
+            const unlocked = AppState.unlocked.includes(course.id);
+            const div = document.createElement('div');
+            div.className = `course-card ${unlocked ? '' : 'locked'}`;
+            div.innerHTML = `<span class="course-icon">${cat === 'rhythm' ? '🥁' : '🎹'}</span>
+                             <b>${course.title}</b>`;
+            div.onclick = () => { if(unlocked) loadCourse(course); };
+            container.appendChild(div);
+        });
+    });
+}
+
+/**
+ * ==========================================
+ * PRÁCTICA (VEXFLOW + GAME LOOP)
+ * ==========================================
+ */
+function loadCourse(course) {
+    AppState.currentCourse = course;
+    AppState.noteIndex = 0;
+    AppState.isPlaying = true;
+    showScreen('screen-practice');
+    document.getElementById('practice-title').innerText = course.title;
+    document.getElementById('feedback-area').innerText = "Escuchando...";
+    document.getElementById('feedback-area').className = '';
+
+    drawScore();
+    practiceLoop();
+}
+
+function drawScore() {
+    const VF = Vex.Flow;
+    const div = document.getElementById("vexflow-output");
+    div.innerHTML = "";
+    
+    const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+    renderer.resize(600, 150);
+    const context = renderer.getContext();
+    
+    // Crear pentagrama
+    const stave = new VF.Stave(10, 40, 550);
+    stave.addClef("treble").addTimeSignature("4/4");
+    stave.setContext(context).draw();
+
+    // Crear notas
+    const notes = AppState.currentCourse.notes.map((n, i) => {
+        let parts = n.split('/'); // formato 'c/4/q'
+        let keys = [parts[0] + '/' + parts[1]];
+        let dur = parts[2];
+        
+        let note = new VF.StaveNote({ keys: keys, duration: dur });
+        
+        // Colorear notas ya pasadas
+        if (i < AppState.noteIndex) note.setStyle({ fillStyle: '#666', strokeStyle: '#666' });
+        // Colorear nota actual (Target)
+        if (i === AppState.noteIndex) note.setStyle({ fillStyle: '#3498db', strokeStyle: '#3498db' });
+        
+        if (parts[0].includes('#')) note.addAccidental(0, new VF.Accidental("#"));
+        
+        return note;
+    });
+
+    const voice = new VF.Voice({num_beats: 4,  beat_value: 4});
+    voice.addTickables(notes);
+    new VF.Formatter().joinVoices([voice]).format([voice], 500);
+    voice.draw(context, stave);
+}
+
+// Bucle principal del juego
+let lastTime = 0;
+function practiceLoop(timestamp) {
+    if (!AppState.isPlaying) return;
+    requestAnimationFrame(practiceLoop);
+
+    const buffer = new Float32Array(AppState.analyser.fftSize);
+    AppState.analyser.getFloatTimeDomainData(buffer);
+    
+    // 1. Detectar lo que canta el usuario
+    const freq = getPitch(buffer, AppState.audioContext.sampleRate);
+    const noteData = freqToNote(freq);
+    
+    // Monitor
+    const monitor = document.getElementById('debug-note');
+    if (noteData) monitor.innerText = `${noteData.name}${noteData.octave}`;
+
+    // 2. Comprobar contra la nota actual
+    const targetStr = AppState.currentCourse.notes[AppState.noteIndex];
+    if (!targetStr) { finishCourse(); return; } // Fin del curso
+
+    const parts = targetStr.split('/'); // c / 4 / q
+    const targetKey = parts[0]; // c
+    const targetOctave = parts[1]; // 4
+    
+    // Lógica de validación
+    let hit = false;
+    
+    // Modo RITMO: Solo miramos volumen fuerte (RMS)
+    if (AppState.currentCourse.cat === 'rhythm') {
+        let rms = Math.sqrt(buffer.reduce((s, v) => s + (v*v), 0) / buffer.length);
+        if (rms > 0.1) hit = true; // Golpe detectado
+    } 
+    // Modo MELODÍA: Miramos frecuencia
+    else {
+        if (noteData && 
+            noteData.vexKey.startsWith(targetKey) && 
+            noteData.octave == targetOctave) {
+            hit = true;
+        }
+    }
+
+    // 3. Gestión del tiempo y avance
+    // Si BPM > 0, avanza por tiempo. Si BPM = 0, avanza por acierto.
+    if (AppState.currentCourse.bpm === 0) {
+        if (hit) {
+            feedback(true);
+            AppState.noteIndex++;
+            setTimeout(drawScore, 200); // Pequeño delay visual
+            // Pequeña pausa para no comerse la siguiente nota
+            AppState.isPlaying = false;
+            setTimeout(() => { AppState.isPlaying = true; practiceLoop(); }, 500);
+            return;
+        }
+    } else {
+        // Lógica de metrónomo (Simplificada para SPA)
+        if (timestamp - lastTime > (60000 / AppState.currentCourse.bpm)) {
+            // Se acabó el tiempo de esta nota
+            feedback(hit); // Si sonó hit en el momento justo (simplificado)
+            AppState.noteIndex++;
+            drawScore();
+            lastTime = timestamp;
+        }
+    }
+}
+
+function feedback(isSuccess) {
+    const el = document.getElementById('feedback-area');
+    if (isSuccess) {
+        el.innerText = "¡BIEN!";
+        el.className = 'success';
+    } else {
+        el.innerText = "FALLO";
+        el.className = 'fail';
+    }
+}
+
+function finishCourse() {
+    AppState.isPlaying = false;
+    document.getElementById('feedback-area').innerText = "¡CURSO COMPLETADO!";
+    
+    // Desbloquear el siguiente
+    const currentIdx = AppState.db.findIndex(c => c.id === AppState.currentCourse.id);
+    if (currentIdx < AppState.db.length - 1) {
+        saveProgress(AppState.db[currentIdx + 1].id);
+    }
+    
+    setTimeout(() => {
+        alert("¡Excelente! Volviendo al menú...");
+        goMenu();
+    }, 2000);
+}
+
+// Iniciar
+showScreen('screen-calibration');
+
+</script>
+</body>
+</html>
