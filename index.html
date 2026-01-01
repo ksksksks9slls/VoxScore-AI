@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Solfeo AI - Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --bg-card: #1e1e1e;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --accent-green: #27ae60;
+            --accent-red: #e74c3c;
+            --accent-blue: #3498db;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        #app-container {
+            width: 100%;
+            max-width: 900px;
+            text-align: center;
+        }
+
+        h1, h2 { margin-bottom: 10px; }
+        p { color: var(--text-secondary); }
+
+        /* --- PANTALLAS Y TRANSICIONES --- */
+        .screen {
+            display: none;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+        }
+        .screen.active {
+            display: block;
+            opacity: 1;
+        }
+
+        /* --- BOTONES --- */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 30px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin: 10px;
+        }
+        .btn-primary { background-color: var(--accent-green); color: white; }
+        .btn-secondary { background-color: var(--bg-card); color: var(--text-primary); border: 1px solid var(--text-secondary); }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        /* --- CALIBRACIÓN --- */
+        #mic-level-bar {
+            width: 300px;
+            height: 20px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            margin: 20px auto;
+            overflow: hidden;
+            border: 2px solid var(--text-secondary);
+        }
+        #mic-level-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--accent-blue);
+            transition: width 0.1s linear;
+        }
+
+        /* --- MENÚ DE CURSOS --- */
+        .academy-section { margin-bottom: 40px; }
+        .academy-title { color: var(--accent-blue); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        .course-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .course-card {
+            background: var(--bg-card);
+            padding: 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            position: relative;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .course-card:hover { border-color: var(--accent-blue); transform: translateY(-5px); }
+        .course-card.locked { opacity: 0.5; pointer-events: none; }
+        .course-card .status-icon { position: absolute; top: 10px; right: 10px; font-size: 1.2rem; }
+
+        /* --- PANTALLA DE PRÁCTICA (VexFlow) --- */
+        #canvas-container {
+            background: var(--bg-card);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            overflow: hidden;
+            position: relative;
+        }
+        /* El canvas de VexFlow es un SVG. Usamos CSS para los efectos de brillo */
+        .vf-stavenote.hit-success path {
+            fill: var(--accent-green) !important;
+            stroke: var(--accent-green) !important;
+            filter: drop-shadow(0 0 8px var(--accent-green));
+            transition: all 0.2s ease;
+        }
+        .vf-stavenote.hit-fail path {
+            fill: var(--accent-red) !important;
+            stroke: var(--accent-red) !important;
+            filter: drop-shadow(0 0 8px var(--accent-red));
+             transition: all 0.2s ease;
+        }
+        .vf-stavenote { transition: opacity 0.3s; }
+        .vf-stavenote.past { opacity: 0.4; }
+
+        #feedback-display { font-size: 1.5rem; margin-top: 20px; height: 30px; font-weight: bold;}
+        .feedback-success { color: var(--accent-green); }
+        .feedback-fail { color: var(--accent-red); }
+        #tuner-indicator { font-size: 0.9rem; color: var(--text-secondary); margin-top: 5px;}
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+
+    <div id="calibration-screen" class="screen active">
+        <h1>Calibración de Audio</h1>
+        <p>Antes de empezar, necesitamos ajustar tu micrófono.</p>
+        <ol style="text-align: left; display: inline-block; margin-top: 20px; color: var(--text-secondary);">
+            <li>Permite el acceso al micrófono cuando se te solicite.</li>
+            <li>Quédate en silencio un momento para medir el ruido de fondo.</li>
+            <li>Canta una nota sostenida (ej: "Aaaa") hasta llenar la barra.</li>
+        </ol>
+        
+        <div id="mic-level-bar"><div id="mic-level-fill"></div></div>
+        <p id="calibration-status">Estado: Esperando micrófono...</p>
+        <button id="start-calibration-btn" class="btn btn-primary">Iniciar Calibración</button>
+        <button id="finish-calibration-btn" class="btn btn-primary" disabled>Continuar a los Cursos</button>
+    </div>
+
+
+    <div id="menu-screen" class="screen">
+        <h1>Academia de Solfeo IA</h1>
+        <p id="welcome-msg">Selecciona tu ruta de aprendizaje</p>
+
+        <div class="academy-section">
+            <h2 class="academy-title">🎵 Academia de Ritmo (Ta-Ta-Ta)</h2>
+            <div class="course-grid" id="rhythm-courses"></div>
+        </div>
+
+        <div class="academy-section">
+            <h2 class="academy-title">🎹 Academia de Entonación (Musical)</h2>
+            <div class="course-grid" id="melodic-courses"></div>
+        </div>
+
+         <div class="academy-section">
+            <h2 class="academy-title">🚀 Academia Pre-Avanzada (Mixto)</h2>
+            <div class="course-grid" id="advanced-courses"></div>
+        </div>
+    </div>
+
+
+    <div id="practice-screen" class="screen">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+             <button class="btn btn-secondary" onclick="navigateTo('menu-screen')">← Volver al Menú</button>
+             <h2 id="lesson-title" style="margin:0;">Lección</h2>
+        </div>
+       
+        <div id="canvas-container">
+            <div id="vf-output"></div>
+        </div>
+        
+        <div id="feedback-display">Escuchando...</div>
+        <div id="tuner-indicator">Nota detectada: <span id="detected-note">--</span></div>
+    </div>
+
+</div>
+
+
+<script>
+// ==================================================================
+// 1. BASE DE DATOS DE CURSOS (CURRICULUM)
+// ==================================================================
+// Definimos los 12 cursos. 
+// type: 'rhythm' (detecta picos de volumen) o 'melodic' (detecta frecuencia exacta)
+// notes: Array de objetos para VexFlow { keys: ['c/4'], duration: 'q' (negra), etc. }
+const COURSES_DB = [
+    // --- ACADEMIA DE RITMO ---
+    { id: 'r1', academy: 'rhythm', title: "Pulso Básico (Negras)", type: 'rhythm', BPM: 60,
+      notes: [{ keys: ["b/4"], duration: "q" }, { keys: ["b/4"], duration: "q" }, { keys: ["b/4"], duration: "qr" }, { keys: ["b/4"], duration: "q" }] },
+    { id: 'r2', academy: 'rhythm', title: "Blancas y Silencios", type: 'rhythm', BPM: 60,
+      notes: [{ keys: ["b/4"], duration: "h" }, { keys: ["b/4"], duration: "hr" }] },
+    { id: 'r3', academy: 'rhythm', title: "Introducción a Corcheas", type: 'rhythm', BPM: 50,
+      notes: [{ keys: ["b/4"], duration: "q" }, { keys: ["b/4"], duration: "8" }, { keys: ["b/4"], duration: "8" }, { keys: ["b/4"], duration: "q" }] },
+    { id: 'r4', academy: 'rhythm', title: "Ritmo Mixto I", type: 'rhythm', BPM: 60,
+      notes: [{ keys: ["b/4"], duration: "q" }, { keys: ["b/4"], duration: "8" }, { keys: ["b/4"], duration: "8" }, { keys: ["b/4"], duration: "h" }] },
+
+    // --- ACADEMIA MELÓDICA (Entonación) ---
+    { id: 'm1', academy: 'melodic', title: "La Tríada (Do-Mi-Sol)", type: 'melodic', clef: 'treble', BPM: 0, // BPM 0 = sin tiempo límite estricto
+      notes: [{ keys: ["c/4"], duration: "w" }, { keys: ["e/4"], duration: "w" }, { keys: ["g/4"], duration: "w" }] },
+    { id: 'm2', academy: 'melodic', title: "Escala Básica (5 notas)", type: 'melodic', clef: 'treble', BPM: 0,
+      notes: [{ keys: ["c/4"], duration: "h" }, { keys: ["d/4"], duration: "h" }, { keys: ["e/4"], duration: "h" }, { keys: ["f/4"], duration: "h" }, { keys: ["g/4"], duration: "w" }] },
+    { id: 'm3', academy: 'melodic', title: "Saltos de Tercera", type: 'melodic', clef: 'treble', BPM: 0,
+      notes: [{ keys: ["c/4"], duration: "h" }, { keys: ["e/4"], duration: "h" }, { keys: ["d/4"], duration: "h" }, { keys: ["f/4"], duration: "h" }] },
+    { id: 'm4', academy: 'melodic', title: "Octava Completa", type: 'melodic', clef: 'treble', BPM: 0,
+      notes: [{ keys: ["c/4"], duration: "q" }, { keys: ["e/4"], duration: "q" }, { keys: ["g/4"], duration: "q" }, { keys: ["c/5"], duration: "w" }] },
+
+    // --- ACADEMIA PRE-AVANZADA ---
+    { id: 'a1', academy: 'advanced', title: "Lectura en Clave de Fa", type: 'melodic', clef: 'bass', BPM: 0,
+      notes: [{ keys: ["c/3"], duration: "w" }, { keys: ["g/2"], duration: "w" }, { keys: ["f/3"], duration: "w" }] },
+    { id: 'a2', academy: 'advanced', title: "Ritmo y Melodía Simple", type: 'melodic', clef: 'treble', BPM: 60, // Melódico con tempo
+      notes: [{ keys: ["c/4"], duration: "q" }, { keys: ["d/4"], duration: "q" }, { keys: ["e/4"], duration: "h" }] },
+    { id: 'a3', academy: 'advanced', title: "Alteraciones (Sostenidos)", type: 'melodic', clef: 'treble', BPM: 0,
+      notes: [{ keys: ["c/4"], duration: "h" }, { keys: ["c#/4"], duration: "h", accidentals:['#'] }, { keys: ["d/4"], duration: "w" }] },
+    { id: 'a4', academy: 'advanced', title: "Examen Final (Himno)", type: 'melodic', clef: 'treble', BPM: 70,
+      notes: [{ keys: ["e/4"], duration: "q" }, { keys: ["e/4"], duration: "q" }, { keys: ["f/4"], duration: "q" }, { keys: ["g/4"], duration: "q" }, { keys: ["g/4"], duration: "q" }, { keys: ["f/4"], duration: "q" }, { keys: ["e/4"], duration: "q" }, { keys: ["d/4"], duration: "q" }] }
+];
+
+// ==================================================================
+// 2. ESTADO GLOBAL Y MEMORIA (localStorage)
+// ==================================================================
+let gameState = {
+    unlockedCourses: JSON.parse(localStorage.getItem('solfeoUnlocked')) || ['r1', 'm1', 'a1'], // Cursos iniciales desbloqueados
+    userProgress: JSON.parse(localStorage.getItem('solfeoProgress')) || {}, // Para guardar estrellas o errores
+    audioCalibrated: false,
+    noiseThreshold: 0.02, // Valor por defecto
+    currentCourse: null,
+    currentNoteIndex: 0,
+    isPlaying: false,
+    audioContext: null,
+    analyser: null,
+    microphone: null,
+    vfRenderer: null, // Referencia al renderizador VexFlow
+    vfSVG: null, // El elemento SVG donde se dibuja
+    currentVexFlowNotes: [] // Referencias a las notas dibujadas para manipularlas
+};
+
+function saveProgress() {
+    localStorage.setItem('solfeoUnlocked', JSON.stringify(gameState.unlockedCourses));
+    localStorage.setItem('solfeoProgress', JSON.stringify(gameState.userProgress));
+}
+
+// ==================================================================
+// 3. NAVEGACIÓN Y UI
+// ==================================================================
+function navigateTo(screenId) {
+    // Si intenta ir al menú sin calibrar, lo devuelve a calibración
+    if (screenId === 'menu-screen' && !gameState.audioCalibrated) {
+        screenId = 'calibration-screen';
+    }
+    
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+
+    if (screenId === 'menu-screen') renderMenu();
+    if (screenId === 'practice-screen') startPractice();
+}
+
+function renderMenu() {
+    const rhythmContainer = document.getElementById('rhythm-courses');
+    const melodicContainer = document.getElementById('melodic-courses');
+    const advancedContainer = document.getElementById('advanced-courses');
+    rhythmContainer.innerHTML = ''; melodicContainer.innerHTML = ''; advancedContainer.innerHTML = '';
+
+    COURSES_DB.forEach(course => {
+        const isUnlocked = gameState.unlockedCourses.includes(course.id);
+        const card = document.createElement('div');
+        card.className = `course-card ${isUnlocked ? '' : 'locked'}`;
+        card.innerHTML = `
+            <h3>${course.title}</h3>
+            <span class="status-icon">${isUnlocked ? '🔓' : '🔒'}</span>
+        `;
+        card.onclick = () => {
+            if (isUnlocked) {
+                gameState.currentCourse = course;
+                navigateTo('practice-screen');
+            }
+        };
+
+        if (course.academy === 'rhythm') rhythmContainer.appendChild(card);
+        else if (course.academy === 'melodic') melodicContainer.appendChild(card);
+        else advancedContainer.appendChild(card);
+    });
+}
+
+// ==================================================================
+// 4. MOTOR DE AUDIO (Inicialización y Calibración)
+// ==================================================================
+async function initAudio() {
+    if (gameState.audioContext) return;
+    gameState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    gameState.analyser = gameState.audioContext.createAnalyser();
+    gameState.analyser.fftSize = 2048; // Tamaño del buffer para el análisis
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        gameState.microphone = gameState.audioContext.createMediaStreamSource(stream);
+        gameState.microphone.connect(gameState.analyser);
+        return true;
+    } catch (e) {
+        alert("Error: Necesitamos acceso al micrófono para funcionar.");
+        console.error(e);
+        return false;
+    }
+}
+
+// Lógica de Calibración Simple
+let calibrationInterval;
+document.getElementById('start-calibration-btn').addEventListener('click', async () => {
+    const success = await initAudio();
+    if (!success) return;
+
+    document.getElementById('start-calibration-btn').disabled = true;
+    const statusTxt = document.getElementById('calibration-status');
+    const fillBar = document.getElementById('mic-level-fill');
+    
+    statusTxt.innerText = "Midiendo ruido de fondo... ¡Silencio!";
+    
+    let maxNoise = 0;
+    let calibrationStep = 0; // 0: Ruido, 1: Señal
+
+    calibrationInterval = setInterval(() => {
+        const buffer = new Float32Array(gameState.analyser.fftSize);
+        gameState.analyser.getFloatTimeDomainData(buffer);
+        let rms = Math.sqrt(buffer.reduce((sum, val) => sum + (val * val), 0) / buffer.length);
+
+        fillBar.style.width = Math.min(rms * 500, 100) + '%'; // Visualización simple
+
+        if (calibrationStep === 0) {
+            if (rms > maxNoise) maxNoise = rms;
+            setTimeout(() => {
+                 if(calibrationStep === 0) {
+                    calibrationStep = 1;
+                    gameState.noiseThreshold = maxNoise * 1.5; // Umbral un poco sobre el ruido
+                    statusTxt.innerText = "¡Ahora canta una nota sostenida fuerte!";
+                    fillBar.style.background = 'var(--accent-green)';
+                 }
+            }, 3000); // 3 segundos de silencio
+        } else if (calibrationStep === 1) {
+            if (rms > gameState.noiseThreshold * 3) { // Si detecta señal fuerte
+                clearInterval(calibrationInterval);
+                fillBar.style.width = '100%';
+                statusTxt.innerText = "¡Calibración exitosa!";
+                gameState.audioCalibrated = true;
+                document.getElementById('finish-calibration-btn').disabled = false;
+            }
+        }
+    }, 50);
+});
+
+document.getElementById('finish-calibration-btn').addEventListener('click', () => navigateTo('menu-screen'));
+
+// ==================================================================
+// 5. ALGORITMO DE DETECCIÓN DE PITCH (Autocorrelación Simplificada)
+// ==================================================================
+// Convierte frecuencia Hz a Nota MIDI y Nombre (ej: 440Hz -> A4)
+const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function getNoteFromFrequency(frequency) {
+    const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+    const midi = Math.round(noteNum) + 69;
+    const noteName = noteStrings[midi % 12];
+    const octave = Math.floor(midi / 12) - 1;
+    return { midi, name: noteName, octave, vexKey: `${noteName.toLowerCase()}/${octave}` };
+}
+
+// Algoritmo YIN (Versión muy simplificada para navegador)
+function autoCorrelate(buffer, sampleRate) {
+    let SIZE = buffer.length;
+    let rms = Math.sqrt(buffer.reduce((sum, val) => sum + (val * val), 0) / SIZE);
+    if (rms < gameState.noiseThreshold) return -1; // Silencio
+
+    let best_offset = -1;
+    let best_correlation = 0;
+    let rms_correlation = 0;
+    let foundGoodCorrelation = false;
+    let correlations = new Array(SIZE).fill(0);
+
+    for (let offset = 0; offset < SIZE; offset++) {
+        let correlation = 0;
+        for (let i = 0; i < SIZE - offset; i++) correlation += Math.abs(buffer[i] - buffer[i + offset]);
+        correlation = 1 - (correlation / SIZE);
+        correlations[offset] = correlation; // Guardamos para análisis simple
+        if ((correlation > 0.9) && (correlation > best_correlation)) {
+            foundGoodCorrelation = true;
+            if (correlation > best_correlation) {
+                best_correlation = correlation;
+                best_offset = offset;
+            }
+        } else if (foundGoodCorrelation) {
+             // Inflexión simple
+             let shift = (correlations[best_offset+1] - correlations[best_offset-1])/correlations[best_offset];  
+             return sampleRate / (best_offset + (8 * shift));
+        }
+    }
+    if (best_correlation > 0.01) return sampleRate / best_offset;
+    return -1;
+}
+
+// ==================================================================
+// 6. MOTOR DE RENDERIZADO (VexFlow Integration)
+// ==================================================================
+function initVexFlow() {
+    const vfDiv = document.getElementById("vf-output");
+    vfDiv.innerHTML = ''; // Limpiar anterior
+    const renderer = new Vex.Flow.Renderer(vfDiv, Vex.Flow.Renderer.Backends.SVG);
+    renderer.resize(800, 200);
+    gameState.vfRenderer = renderer;
+    gameState.vfContext = renderer.getContext();
+    gameState.vfContext.setFont("Arial", 10, "").setBackgroundFillStyle("var(--bg-card)");
+    // Guardamos referencia al SVG para manipular clases CSS luego
+    setTimeout(() => { gameState.vfSVG = vfDiv.querySelector('svg'); }, 100);
+}
+
+function drawLesson(courseData, highlightIndex = -1) {
+    gameState.vfContext.clear();
+    // Crear Pentagrama
+    const stave = new Vex.Flow.Stave(10, 40, 750);
+    stave.addClef(courseData.clef || 'treble');
+    if (courseData.academy === 'rhythm') stave.setText("Ritmo", Vex.Flow.Modifier.Position.LEFT);
+    stave.setContext(gameState.vfContext).draw();
+
+    // Crear Notas
+    const vexNotes = courseData.notes.map((noteDef) => {
+        const note = new Vex.Flow.StaveNote({
+             keys: noteDef.keys, duration: noteDef.duration, clef: courseData.clef || 'treble',
+             auto_stem: courseData.academy !== 'rhythm' // Sin plicas en modo ritmo puro si s
